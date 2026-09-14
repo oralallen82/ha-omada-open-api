@@ -108,6 +108,15 @@ class ClientCredentialsAuth(OmadaAuthStrategy):
         from .api import OmadaApiAuthError, OmadaApiError
 
         url = f"{self._api_url}/openapi/authorize/token"
+        # v1.10.1 sent these credentials as a JSON body ("keep refresh
+        # credentials out of URLs", commit e197022), which real Omada
+        # controllers reject for this grant type -- causing hard
+        # ConfigEntryAuthFailed errors requiring manual reauthentication,
+        # typically whenever the access token neared its ~2h expiry.
+        # Confirmed against a live controller that the refresh_token
+        # grant accepts these as a form-encoded body instead, which
+        # keeps credentials out of the URL (the original goal) while
+        # actually working in production.
         params = {"grant_type": "refresh_token"}
         data = {
             "client_id": self._client_id,
@@ -119,7 +128,7 @@ class ClientCredentialsAuth(OmadaAuthStrategy):
             async with self._session.post(
                 url,
                 params=params,
-                json=data,
+                data=data,
                 timeout=aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT),
             ) as response:
                 if response.status == 401:
