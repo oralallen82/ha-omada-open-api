@@ -108,8 +108,20 @@ class ClientCredentialsAuth(OmadaAuthStrategy):
         from .api import OmadaApiAuthError, OmadaApiError
 
         url = f"{self._api_url}/openapi/authorize/token"
-        params = {"grant_type": "refresh_token"}
-        data = {
+        # NOTE: v1.10.1 moved these into a JSON body ("keep refresh
+        # credentials out of URLs", commit e197022) to avoid leaking
+        # secrets into logs/proxies. That change only reflects the
+        # OAuth spec's convention, not what the actual Omada Open API
+        # controller endpoint accepts for this grant type in practice
+        # -- it was validated with mocked tests only, never against a
+        # live controller. In production the refresh call then fails
+        # with an error code outside the auto-fallback list, which
+        # HA surfaces as ConfigEntryAuthFailed (forced Reauthenticate).
+        # Reverted to the pre-1.10.1 all-query-params form, which is
+        # what TP-Link's own Open API docs/samples show and what
+        # actually works against a live controller.
+        params = {
+            "grant_type": "refresh_token",
             "client_id": self._client_id,
             "client_secret": self._client_secret,
             "refresh_token": self._refresh_token,
@@ -119,7 +131,6 @@ class ClientCredentialsAuth(OmadaAuthStrategy):
             async with self._session.post(
                 url,
                 params=params,
-                json=data,
                 timeout=aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT),
             ) as response:
                 if response.status == 401:
