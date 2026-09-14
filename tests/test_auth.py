@@ -104,18 +104,18 @@ class TestClientCredentialsAuth:
         assert auth._refresh_token == "new_refresh"
 
     @pytest.mark.asyncio
-    async def test_refresh_sends_credentials_as_query_params(self) -> None:
-        """Refresh credentials are sent as query params.
+    async def test_refresh_sends_credentials_in_request_body(self) -> None:
+        """Refresh credentials are excluded from the URL and sent form-encoded.
 
         Regression test for the v1.10.1 change that moved these into a
-        JSON body ("keep refresh credentials out of URLs", #e197022).
-        That form is not accepted by the refresh_token grant on real
-        Omada controllers -- it caused frequent, hard ConfigEntryAuthFailed
-        errors requiring manual reauthentication in production, even
-        though it passed here because this test only exercised a mock.
-        Reverted to the query-param form, which matches TP-Link's own
-        Open API docs/samples and is confirmed working against live
-        controllers.
+        *JSON* body ("keep refresh credentials out of URLs", #e197022).
+        That form is rejected by the refresh_token grant on real Omada
+        controllers, causing hard ConfigEntryAuthFailed errors that force
+        manual reauthentication in production -- even though it passed
+        here, because this test only ever exercised a mock. Confirmed
+        against a live controller that a form-encoded body (`data=`)
+        keeps credentials out of the URL, same as intended, while
+        actually working.
         """
         auth = self._make_auth(
             token_expires_at=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
@@ -141,8 +141,8 @@ class TestClientCredentialsAuth:
         await auth.ensure_valid_session()
 
         request_kwargs = auth._session.post.call_args.kwargs
-        assert request_kwargs["params"] == {
-            "grant_type": "refresh_token",
+        assert request_kwargs["params"] == {"grant_type": "refresh_token"}
+        assert request_kwargs["data"] == {
             "client_id": TEST_CLIENT_ID,
             "client_secret": TEST_CLIENT_SECRET,
             "refresh_token": "test_refresh",
