@@ -220,6 +220,57 @@ class TestClientCredentialsAuth:
         assert auth._access_token == "fresh_access"
 
     @pytest.mark.asyncio
+    async def test_refresh_falls_back_to_fresh_tokens_on_invalid_params(
+        self,
+    ) -> None:
+        """When refresh returns -1001, falls back to client_credentials.
+
+        -1001 ("Invalid request parameters") is what a live controller
+        returns when the refresh_token grant's request body isn't in a
+        format it accepts -- confirmed on both a local and a
+        cloud-hosted controller. Included in the fallback set as
+        defense-in-depth so a malformed refresh request self-heals via
+        a fresh login instead of hard-failing and forcing manual
+        reauthentication.
+        """
+        auth = self._make_auth(
+            token_expires_at=dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
+        )
+
+        refresh_response = AsyncMock()
+        refresh_response.status = 200
+        refresh_response.json = AsyncMock(
+            return_value={"errorCode": -1001, "msg": "Invalid request parameters"}
+        )
+
+        fresh_response = AsyncMock()
+        fresh_response.status = 200
+        fresh_response.json = AsyncMock(
+            return_value={
+                "errorCode": 0,
+                "result": {
+                    "accessToken": "fresh_access",
+                    "refreshToken": "fresh_refresh",
+                    "expiresIn": 7200,
+                },
+            }
+        )
+
+        mock_ctx_1 = AsyncMock()
+        mock_ctx_1.__aenter__ = AsyncMock(return_value=refresh_response)
+        mock_ctx_1.__aexit__ = AsyncMock(return_value=False)
+
+        mock_ctx_2 = AsyncMock()
+        mock_ctx_2.__aenter__ = AsyncMock(return_value=fresh_response)
+        mock_ctx_2.__aexit__ = AsyncMock(return_value=False)
+
+        auth._session.post.side_effect = [mock_ctx_1, mock_ctx_2]
+
+        await auth.ensure_valid_session()
+
+        assert auth._access_token == "fresh_access"
+
+    @pytest.mark.asyncio
     async def test_token_update_callback_called_after_refresh(self) -> None:
         """Token update callback is invoked after successful refresh."""
         auth = self._make_auth(
